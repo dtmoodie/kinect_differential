@@ -1,0 +1,7 @@
+\subsubsection usage Usage
+\verbatim
+<node name="kinect_differential" pkg="kinect_differential" type="kinect_differential">
+  <param name="BuildModel" type="bool" value="False" />
+</node>
+\endverbatim
+

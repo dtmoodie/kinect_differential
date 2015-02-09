@@ -1,0 +1,6 @@
+\subsubsection parameters ROS parameters
+
+Reads and maintains the following parameters on the ROS server
+
+- \b "~BuildModel" : \b [bool] Set to true to rebuild the environment model min: False, default: False, max: True
+
