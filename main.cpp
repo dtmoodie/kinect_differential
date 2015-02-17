@@ -132,7 +132,6 @@ void DepthImageHandler::handleDepthReceived(cv::Mat depth, cv::Mat XYZ)
                     if(*maskPtr)
                     {
                         float depth = *ptr;
-                        //ptCloud->push_back(pcl::PointXYZ((j - cx_d) * depth / fx_d, (i - cy_d)*depth / fy_d, depth));
                         ptCloud->push_back((*_cloudPtr)[count]);
                     }
                 }
@@ -144,23 +143,22 @@ void DepthImageHandler::handleDepthReceived(cv::Mat depth, cv::Mat XYZ)
         if(_pub.getNumSubscribers() == 0)
             return;
         std::cout << "Publishing point cloud with " << XYZ.rows << " " << XYZ.cols << std::endl;
-        pcl::PointCloud<pcl::PointXYZ>::Ptr ptCloud(new pcl::PointCloud<pcl::PointXYZ>());
-        ptCloud->reserve(XYZ.rows*XYZ.cols);
-        unsigned short* ptr = depth.ptr<unsigned short>(0);
-        unsigned int count = 0;
-        for(int i = 0; i < depth.rows; ++i, ++ptr, ++count)
+        //pcl::PointCloud<pcl::PointXYZ>::Ptr ptCloud(new pcl::PointCloud<pcl::PointXYZ>());
+        //ptCloud->reserve(XYZ.rows*XYZ.cols);
+        //unsigned short* ptr = depth.ptr<unsigned short>(0);
+        //unsigned int count = 0;
+        /*for(int i = 0; i < depth.rows; ++i, ++ptr, ++count)
         {
             for(int j = 0; j < depth.cols; ++j, ++ptr, ++count)
             {
                 float depth = *ptr;
-                //ptCloud->push_back(pcl::PointXYZ((j - cx_d) * depth / fx_d, (i - cy_d)*depth / fy_d, depth));
                 ptCloud->push_back((*_cloudPtr)[count]);
             }
         }
         ptCloud->height = XYZ.rows;
         ptCloud->width = XYZ.cols;
-        ptCloud->is_dense = true;
-        _pub.publish(ptCloud);
+        ptCloud->is_dense = true;*/
+        _pub.publish(_cloudPtr);
     }
 }
 
