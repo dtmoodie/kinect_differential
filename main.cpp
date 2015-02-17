@@ -184,19 +184,23 @@ void DepthImageHandler::depthCallback(const sensor_msgs::ImageConstPtr &msg)
         ROS_ERROR("Could not convert from '%s' to '16UC1'.", msg->encoding.c_str());
         return;
     }
-
+    std::cout << "Received depth image of " << depthImg.rows << " x " << depthImg.cols << std::endl;
     handleDepthReceived(depthImg, cv::Mat());
 }
 void DepthImageHandler::ptCloudCallback(const sensor_msgs::PointCloud2 &pc2)
 {
+
     pcl::fromROSMsg(pc2, *_cloudPtr);
+    std::cout << "Received depth image: " << _cloudPtr->width << " x " << _cloudPtr->height << std::endl;
 }
 
 bool DepthImageHandler::open(std::string depthTopic, std::string ptCloudTopic)
 {
     std::cout << "Subscribing to depth topic: " << depthTopic << std::endl;
+    std::cout << "Subscribing to point topic: " << ptCloudTopic << std::endl;
     imageSub = it.subscribe(depthTopic, 1, &DepthImageHandler::depthCallback,this);
     ptCloudSub = _nh.subscribe(ptCloudTopic, 1, &DepthImageHandler::ptCloudCallback, this);
+
     ros::spin();
 }
 
@@ -210,5 +214,11 @@ int main(int argc, char** argv)
         ROS_WARN("DepthTopic has not been remapped!");
         return -1;
     }
+    if(ros::names::remap("PointTopic") == "PointTopic")
+        if(ros::names::remap("DepthTopic") == "DepthTopic")
+        {
+            ROS_WARN("PointTopic has not been remapped!");
+            return -1;
+        }
     dih.open(ros::names::remap("DepthTopic"), ros::names::remap("PointTopic"));
 }

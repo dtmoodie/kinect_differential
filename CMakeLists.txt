@@ -15,7 +15,6 @@ find_package(catkin REQUIRED COMPONENTS
 find_package(OpenCV 3.0 REQUIRED COMPONENTS core videoio)
 find_package(PCL REQUIRED COMPONENTS common)
 find_package(libfreenect REQUIRED)
-find_package(libusb-1.0 REQUIRED)
 generate_dynamic_reconfigure_options(cfg/DiffKinect.cfg)
 
 ## System dependencies are found with CMake's conventions
