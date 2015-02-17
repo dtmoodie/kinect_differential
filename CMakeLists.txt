@@ -10,9 +10,9 @@ find_package(catkin REQUIRED COMPONENTS
     dynamic_reconfigure
 )
 
-find_package(OpenCV 3.0 REQUIRED COMPONENTS core cuda)
+find_package(OpenCV 3.0 REQUIRED COMPONENTS core videoio)
 find_package(PCL REQUIRED COMPONENTS common)
-
+find_package(libfreenect REQUIRED)
 generate_dynamic_reconfigure_options(cfg/DiffKinect.cfg)
 
 ## System dependencies are found with CMake's conventions
@@ -102,6 +102,7 @@ include_directories(
   ${catkin_INCLUDE_DIRS}
   ${OpenCV_INCLUDE_DIRS}
   ${PCL_INCLUDE_DIRS}
+  ${FREENECT_INCLUDE_DIRS}
 )
 
 ## Declare a cpp library
@@ -123,6 +124,7 @@ add_executable(kinect_differential_node main.cpp)
     opencv_core
     ${OpenCV_LIBRARIES}
    ${OpenCV_LIBS}
+   ${libfreenect_LIBRARIES}
  )
 
 #############

@@ -2,20 +2,38 @@
 #include <opencv2/core.hpp>
 #include <opencv2/videoio.hpp>
 #include <opencv2/highgui.hpp>
-#include <opencv2/cuda.hpp>
-#include <opencv2/cudaarithm.hpp>
+//#include <opencv2/cuda.hpp>
+//#include <opencv2/cudaarithm.hpp>
 #include <iostream>
 #include <pcl_ros/point_cloud.h>
 
 #include "cfg/cpp/kinect_differential/DiffKinectConfig.h"
 #include <dynamic_reconfigure/server.h>
-#include <image_transport/image_transport.h>
-#include <cv_bridge/cv_bridge.h>
+//#include <image_transport/image_transport.h>
+//#include <cv_bridge/cv_bridge.h>
 #include <sensor_msgs/PointCloud2.h>
 #include <boost/thread.hpp>
 #include <boost/date_time.hpp>
 #include <pcl/point_types.h>
 #include <pcl/point_cloud.h>
+#include "libfreenect.h"
+
+
+class MyFreenectDevice: public Freenect::FreenectDevice
+{
+ public:
+  MyFreenectDevice(freenect_context* _ctx, int _index):
+    Freenect::FreenectDevice(_ctx, _index), m_buffer_depth(FREENECT_DEPTH_11BIT),
+    m_buffer_rgb(FREENECT_VIDEO_RGB), m_gamma(2048), m_new_rgb_frame(false),
+    m_new_depth_frame(false), depthMat(cv::Size(640,480), CV_16UC1), rgbMat(cv::Size(640,480), CV_8UC3, cv::Scalar(0)),
+    ownMat(cv::Size(640,480), CV_8UC3, cv::Scalar(0))
+{
+  for(unsigned int i = 0; 
+}
+
+}
+
+
 
 class DepthImageHandler
 {
@@ -107,12 +125,12 @@ void DepthImageHandler::handleDepthReceived(cv::Mat depth, cv::Mat XYZ)
         {
             cv::Mat mask1 = depth > modelThresholdHigh;
             cv::Mat mask2 = depth < modelThresholdLow;
-            cv::imshow("Mask1", mask1);
-            cv::imshow("Mask2", mask2);
+       //     cv::imshow("Mask1", mask1);
+     //       cv::imshow("Mask2", mask2);
             cv::Mat mask;
 
             cv::bitwise_or(mask1,mask2, mask);
-            cv::imshow("Mask", mask);
+   //         cv::imshow("Mask", mask);
             int numPoints = cv::countNonZero(mask);
             std::cout << "Number of filtered points: " << numPoints << std::endl;
             cv::Vec3f* ptr = XYZ.ptr<cv::Vec3f>(0);
@@ -172,9 +190,15 @@ bool DepthImageHandler::open()
     while(_nh.ok() && key != 27)
     {
         if(cam->read(depth))
-            cv::imshow("Depth", depth);
+{
+
+}
+ //           cv::imshow("Depth", depth);
         if(cam->retrieve(XYZ, cv::CAP_OPENNI_POINT_CLOUD_MAP))
-            cv::imshow("XYZ", XYZ);
+{
+
+}
+//            cv::imshow("XYZ", XYZ);
         key = cv::waitKey(30);
 
         handleDepthReceived(depth,XYZ);
