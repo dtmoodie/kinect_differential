@@ -2,38 +2,23 @@
 #include <opencv2/core.hpp>
 #include <opencv2/videoio.hpp>
 #include <opencv2/highgui.hpp>
-//#include <opencv2/cuda.hpp>
-//#include <opencv2/cudaarithm.hpp>
 #include <iostream>
 #include <pcl_ros/point_cloud.h>
 
 #include "cfg/cpp/kinect_differential/DiffKinectConfig.h"
 #include <dynamic_reconfigure/server.h>
-//#include <image_transport/image_transport.h>
-//#include <cv_bridge/cv_bridge.h>
 #include <sensor_msgs/PointCloud2.h>
 #include <boost/thread.hpp>
 #include <boost/date_time.hpp>
 #include <pcl/point_types.h>
 #include <pcl/point_cloud.h>
-#include "libfreenect.h"
+#include <cv_bridge/cv_bridge.h>
+#include "image_transport/image_transport.h"
 
-
-class MyFreenectDevice: public Freenect::FreenectDevice
-{
- public:
-  MyFreenectDevice(freenect_context* _ctx, int _index):
-    Freenect::FreenectDevice(_ctx, _index), m_buffer_depth(FREENECT_DEPTH_11BIT),
-    m_buffer_rgb(FREENECT_VIDEO_RGB), m_gamma(2048), m_new_rgb_frame(false),
-    m_new_depth_frame(false), depthMat(cv::Size(640,480), CV_16UC1), rgbMat(cv::Size(640,480), CV_8UC3, cv::Scalar(0)),
-    ownMat(cv::Size(640,480), CV_8UC3, cv::Scalar(0))
-{
-  for(unsigned int i = 0; 
-}
-
-}
-
-
+const float fx_d = 5.9421434211923247e+02;
+const float fy_d = 5.9104053696870778e+02;
+const float cx_d = 3.3930780975300314e+02;
+const float cy_d = 2.4273913761751615e+02;
 
 class DepthImageHandler
 {
@@ -44,9 +29,9 @@ public:
     void handleDepthReceived(cv::Mat depth, cv::Mat XYZ);
 
     void messageCallback(kinect_differential::DiffKinectConfig& config, uint32_t level);
-
-    bool open();
-
+    void depthCallback(const sensor_msgs::ImageConstPtr &msg);
+    void ptCloudCallback(const sensor_msgs::PointCloud2 &pc2);
+    bool open(std::string depthTopic, std::string ptCloudTopic);
 
 
 
@@ -61,12 +46,17 @@ public:
     float deviationThreshold;
     int numFramesToBuildModel;
     bool buildModel;
+    image_transport::ImageTransport  it;
+    image_transport::Subscriber imageSub;
+    ros::Subscriber ptCloudSub;
+    pcl::PointCloud<pcl::PointXYZ>::Ptr _cloudPtr;
+
 };
 
 DepthImageHandler::DepthImageHandler(const std::string &name):
-    cam(NULL)
+    cam(NULL), it(_nh), _cloudPtr(new pcl::PointCloud<pcl::PointXYZ>)
 {
-    _name = _nh.resolveName(name);
+    _name = name;
     std::cout << "Named resolved to: " << _name << std::endl;
     dynamic_reconfigure::Server<kinect_differential::DiffKinectConfig>::CallbackType f;
     f = boost::bind(&DepthImageHandler::messageCallback, this, _1, _2);
@@ -125,23 +115,26 @@ void DepthImageHandler::handleDepthReceived(cv::Mat depth, cv::Mat XYZ)
         {
             cv::Mat mask1 = depth > modelThresholdHigh;
             cv::Mat mask2 = depth < modelThresholdLow;
-       //     cv::imshow("Mask1", mask1);
-     //       cv::imshow("Mask2", mask2);
             cv::Mat mask;
 
             cv::bitwise_or(mask1,mask2, mask);
-   //         cv::imshow("Mask", mask);
             int numPoints = cv::countNonZero(mask);
             std::cout << "Number of filtered points: " << numPoints << std::endl;
-            cv::Vec3f* ptr = XYZ.ptr<cv::Vec3f>(0);
+            unsigned short* ptr = depth.ptr<unsigned short>(0);
             uchar* maskPtr = mask.ptr<uchar>(0);
             pcl::PointCloud<pcl::PointXYZ>::Ptr ptCloud(new pcl::PointCloud<pcl::PointXYZ>());
             ptCloud->reserve(numPoints);
-            for(int i = 0; i < mask.rows*mask.cols; ++i, ++ptr, ++maskPtr)
+            unsigned int count = 0;
+            for(int i = 0; i < mask.rows; ++i, ++ptr, ++maskPtr, ++count)
             {
-                if(*maskPtr)
+                for(int j = 0; j < mask.cols; ++j, ++ptr, ++maskPtr, ++count)
                 {
-                    ptCloud->push_back(pcl::PointXYZ(ptr->val[0], ptr->val[1], ptr->val[2]));
+                    if(*maskPtr)
+                    {
+                        float depth = *ptr;
+                        //ptCloud->push_back(pcl::PointXYZ((j - cx_d) * depth / fx_d, (i - cy_d)*depth / fy_d, depth));
+                        ptCloud->push_back((*_cloudPtr)[count]);
+                    }
                 }
             }
             _pub.publish(ptCloud);
@@ -153,17 +146,22 @@ void DepthImageHandler::handleDepthReceived(cv::Mat depth, cv::Mat XYZ)
         std::cout << "Publishing point cloud with " << XYZ.rows << " " << XYZ.cols << std::endl;
         pcl::PointCloud<pcl::PointXYZ>::Ptr ptCloud(new pcl::PointCloud<pcl::PointXYZ>());
         ptCloud->reserve(XYZ.rows*XYZ.cols);
-        cv::Vec3f* ptr = XYZ.ptr<cv::Vec3f>(0);
-        for(int i = 0; i < XYZ.rows*XYZ.cols; ++i, ++ptr)
+        unsigned short* ptr = depth.ptr<unsigned short>(0);
+        unsigned int count = 0;
+        for(int i = 0; i < depth.rows; ++i, ++ptr, ++count)
         {
-            ptCloud->push_back(pcl::PointXYZ(ptr->val[0], ptr->val[1], ptr->val[2]));
+            for(int j = 0; j < depth.cols; ++j, ++ptr, ++count)
+            {
+                float depth = *ptr;
+                //ptCloud->push_back(pcl::PointXYZ((j - cx_d) * depth / fx_d, (i - cy_d)*depth / fy_d, depth));
+                ptCloud->push_back((*_cloudPtr)[count]);
+            }
         }
         ptCloud->height = XYZ.rows;
         ptCloud->width = XYZ.cols;
         ptCloud->is_dense = true;
         _pub.publish(ptCloud);
     }
-
 }
 
 void DepthImageHandler::messageCallback(kinect_differential::DiffKinectConfig& config, uint32_t level)
@@ -176,42 +174,43 @@ void DepthImageHandler::messageCallback(kinect_differential::DiffKinectConfig& c
     }
 }
 
-bool DepthImageHandler::open()
+void DepthImageHandler::depthCallback(const sensor_msgs::ImageConstPtr &msg)
 {
-    if(cam == NULL)
-        cam = new cv::VideoCapture();
-    cam->open(cv::CAP_OPENNI);
-    if(cam->isOpened())
+    cv::Mat depthImg;
+    try
     {
-        std::cout << "Successfully opened camera" << std::endl;
+        depthImg = cv_bridge::toCvCopy(msg, "16UC1")->image;
     }
-    int key = 0;
-    cv::Mat depth, XYZ;
-    while(_nh.ok() && key != 27)
+    catch (cv_bridge::Exception& e)
     {
-        if(cam->read(depth))
-{
-
-}
- //           cv::imshow("Depth", depth);
-        if(cam->retrieve(XYZ, cv::CAP_OPENNI_POINT_CLOUD_MAP))
-{
-
-}
-//            cv::imshow("XYZ", XYZ);
-        key = cv::waitKey(30);
-
-        handleDepthReceived(depth,XYZ);
-        //boost::this_thread::sleep_for(boost::chrono::milliseconds(10));
-        ros::spinOnce();
+        ROS_ERROR("Could not convert from '%s' to '16UC1'.", msg->encoding.c_str());
+        return;
     }
+
+    handleDepthReceived(depthImg, cv::Mat());
+}
+void DepthImageHandler::ptCloudCallback(const sensor_msgs::PointCloud2 &pc2)
+{
+    pcl::fromROSMsg(pc2, *_cloudPtr);
 }
 
-
+bool DepthImageHandler::open(std::string depthTopic, std::string ptCloudTopic)
+{
+    std::cout << "Subscribing to depth topic: " << depthTopic << std::endl;
+    imageSub = it.subscribe(depthTopic, 1, &DepthImageHandler::depthCallback,this);
+    ptCloudSub = _nh.subscribe(ptCloudTopic, 1, &DepthImageHandler::ptCloudCallback, this);
+    ros::spin();
+}
 
 int main(int argc, char** argv)
 {
     ros::init(argc, argv, "KinectCamera");
-    DepthImageHandler dih("KinectCamera");
-    dih.open();
+
+    DepthImageHandler dih(ros::names::remap("KinectCamera"));
+    if(ros::names::remap("DepthTopic") == "DepthTopic")
+    {
+        ROS_WARN("DepthTopic has not been remapped!");
+        return -1;
+    }
+    dih.open(ros::names::remap("DepthTopic"), ros::names::remap("PointTopic"));
 }
