@@ -38,6 +38,7 @@ public:
     cv::VideoCapture* cam;
     ros::NodeHandle _nh;
     ros::Publisher _pub;
+    ros::Publisher _modelPub;
 
     std::string _name;
     dynamic_reconfigure::Server<kinect_differential::DiffKinectConfig> _server;
@@ -50,6 +51,7 @@ public:
     image_transport::Subscriber imageSub;
     ros::Subscriber ptCloudSub;
     pcl::PointCloud<pcl::PointXYZ>::Ptr _cloudPtr;
+    pcl::PointCloud<pcl::PointXYZ>::Ptr _modelPtr;
 
 };
 
@@ -62,7 +64,6 @@ DepthImageHandler::DepthImageHandler(const std::string &name):
     f = boost::bind(&DepthImageHandler::messageCallback, this, _1, _2);
     _server.setCallback(f);
     _pub = _nh.advertise<sensor_msgs::PointCloud2>(_nh.resolveName("KinectCamera/PointCloud"),1); //_it.advertise(_name, 1);
-
     deviationThreshold = 4;
     numFramesToBuildModel = 50;
     buildModel = false;
@@ -107,7 +108,10 @@ void DepthImageHandler::handleDepthReceived(cv::Mat depth, cv::Mat XYZ)
         {
             frames.push_back(depth);
         }
-
+        _modelPtr = _cloudPtr;
+        _cloudPtr.reset(new pcl::PointCloud<pcl::PointXYZ>);
+        _modelPub = _nh.advertise<sensor_msgs::PointCloud2>(_nh.resolveName("KinectCamera/ModelCloud"),1); //_it.advertise(_name, 1);
+        _modelPub.publish(_modelPtr);
     }
     if(!modelThresholdHigh.empty() && !modelThresholdLow.empty())
     {
@@ -131,7 +135,6 @@ void DepthImageHandler::handleDepthReceived(cv::Mat depth, cv::Mat XYZ)
                 {
                     if(*maskPtr)
                     {
-                        float depth = *ptr;
                         ptCloud->push_back((*_cloudPtr)[count]);
                     }
                 }
@@ -143,21 +146,6 @@ void DepthImageHandler::handleDepthReceived(cv::Mat depth, cv::Mat XYZ)
         if(_pub.getNumSubscribers() == 0)
             return;
         std::cout << "Publishing point cloud with " << XYZ.rows << " " << XYZ.cols << std::endl;
-        //pcl::PointCloud<pcl::PointXYZ>::Ptr ptCloud(new pcl::PointCloud<pcl::PointXYZ>());
-        //ptCloud->reserve(XYZ.rows*XYZ.cols);
-        //unsigned short* ptr = depth.ptr<unsigned short>(0);
-        //unsigned int count = 0;
-        /*for(int i = 0; i < depth.rows; ++i, ++ptr, ++count)
-        {
-            for(int j = 0; j < depth.cols; ++j, ++ptr, ++count)
-            {
-                float depth = *ptr;
-                ptCloud->push_back((*_cloudPtr)[count]);
-            }
-        }
-        ptCloud->height = XYZ.rows;
-        ptCloud->width = XYZ.cols;
-        ptCloud->is_dense = true;*/
         _pub.publish(_cloudPtr);
     }
 }
@@ -215,10 +203,9 @@ int main(int argc, char** argv)
         return -1;
     }
     if(ros::names::remap("PointTopic") == "PointTopic")
-        if(ros::names::remap("DepthTopic") == "DepthTopic")
-        {
-            ROS_WARN("PointTopic has not been remapped!");
-            return -1;
-        }
+    {
+        ROS_WARN("PointTopic has not been remapped!");
+        return -1;
+    }
     dih.open(ros::names::remap("DepthTopic"), ros::names::remap("PointTopic"));
 }

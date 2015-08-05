@@ -8,8 +8,8 @@ find_package(catkin REQUIRED COMPONENTS
     sensor_msgs
     pcl_ros
     dynamic_reconfigure
-  cv_bridge
-  image_transport
+    cv_bridge
+    image_transport
 )
 
 find_package(OpenCV 3.0 REQUIRED COMPONENTS core videoio)
@@ -75,7 +75,7 @@ generate_dynamic_reconfigure_options(cfg/DiffKinect.cfg)
 # generate_messages(
 #   DEPENDENCIES
 #   sensor_msgs
-# )
+#)
 
 ###################################
 ## catkin specific configuration ##
