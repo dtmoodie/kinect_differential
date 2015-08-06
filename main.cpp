@@ -10,6 +10,7 @@
 #include <sensor_msgs/PointCloud2.h>
 #include <boost/thread.hpp>
 #include <boost/date_time.hpp>
+#include <boost/thread/mutex.hpp>
 #include <pcl/point_types.h>
 #include <pcl/point_cloud.h>
 #include <cv_bridge/cv_bridge.h>
@@ -52,7 +53,7 @@ public:
     ros::Subscriber ptCloudSub;
     pcl::PointCloud<pcl::PointXYZ>::Ptr _cloudPtr;
     pcl::PointCloud<pcl::PointXYZ>::Ptr _modelPtr;
-
+    boost::mutex mtx;
 };
 
 DepthImageHandler::DepthImageHandler(const std::string &name):
@@ -65,7 +66,7 @@ DepthImageHandler::DepthImageHandler(const std::string &name):
     _server.setCallback(f);
     _pub = _nh.advertise<sensor_msgs::PointCloud2>(_nh.resolveName("KinectCamera/PointCloud"),1); //_it.advertise(_name, 1);
     deviationThreshold = 4;
-    numFramesToBuildModel = 50;
+    numFramesToBuildModel = 10;
     buildModel = false;
 }
 
@@ -81,6 +82,8 @@ DepthImageHandler::~DepthImageHandler()
 
 void DepthImageHandler::handleDepthReceived(cv::Mat depth, cv::Mat XYZ)
 {
+boost::mutex::scoped_lock lock(mtx);
+std::cout << "Received depth image " << depth.depth()<< std::endl;
     if(buildModel)
     {
         static std::vector<cv::Mat> frames;
@@ -94,13 +97,13 @@ void DepthImageHandler::handleDepthReceived(cv::Mat depth, cv::Mat XYZ)
             {
                 frames[i].convertTo(frame,CV_32F);
                 sum += frame;
-                sum_sq += frame.mul(frame);
+                //sum_sq += frame.mul(frame);
             }
             cv::Mat mean = sum * (1.0 / frames.size());
-            cv::Mat var = (sum_sq - sum.mul(sum)/float(frames.size()))/(float(frames.size()) - 1);
-            cv::sqrt(var, var);
-            cv::Mat(mean + 100).convertTo(modelThresholdHigh, CV_16U);
-            cv::Mat(mean - 100).convertTo(modelThresholdLow, CV_16U);
+            //cv::Mat var = (sum_sq - sum.mul(sum)/float(frames.size()))/(float(frames.size()) - 1);
+            //cv::sqrt(var, var);
+            cv::Mat(mean + 10).convertTo(modelThresholdHigh, CV_16U);
+            cv::Mat(mean - 10).convertTo(modelThresholdLow, CV_16U);
 
             frames.clear();
             buildModel = false;
@@ -112,6 +115,7 @@ void DepthImageHandler::handleDepthReceived(cv::Mat depth, cv::Mat XYZ)
         _cloudPtr.reset(new pcl::PointCloud<pcl::PointXYZ>);
         _modelPub = _nh.advertise<sensor_msgs::PointCloud2>(_nh.resolveName("KinectCamera/ModelCloud"),1); //_it.advertise(_name, 1);
         _modelPub.publish(_modelPtr);
+      std::cout << "Publishing model " << std::endl;
     }
     if(!modelThresholdHigh.empty() && !modelThresholdLow.empty())
     {
@@ -123,7 +127,8 @@ void DepthImageHandler::handleDepthReceived(cv::Mat depth, cv::Mat XYZ)
 
             cv::bitwise_or(mask1,mask2, mask);
             int numPoints = cv::countNonZero(mask);
-            std::cout << "Number of filtered points: " << numPoints << std::endl;
+            if(numPoints)
+              std::cout << "Number of filtered points: " << numPoints << std::endl;
             unsigned short* ptr = depth.ptr<unsigned short>(0);
             uchar* maskPtr = mask.ptr<uchar>(0);
             pcl::PointCloud<pcl::PointXYZ>::Ptr ptCloud(new pcl::PointCloud<pcl::PointXYZ>());
@@ -140,14 +145,38 @@ void DepthImageHandler::handleDepthReceived(cv::Mat depth, cv::Mat XYZ)
                 }
             }
             _pub.publish(ptCloud);
+         std::cout << "Publishing filtered cloud" << std::endl;
+		return;
         }
     }else
     {
         if(_pub.getNumSubscribers() == 0)
             return;
-        std::cout << "Publishing point cloud with " << XYZ.rows << " " << XYZ.cols << std::endl;
-        _pub.publish(_cloudPtr);
+//static boost::posix_time::ptime lastTIme = boost::date_time::microsec_clock<boost::posix_time::ptime>::universal_time();
+//	boost::posix_time::ptime currentTime = boost::date_time::microsec_clock<boost::posix_time::ptime>::unviersal_time();
+//if(boost::posix_time::time_duration(currentTime - lastTime).total_milliseconds() > 300)
+//{/
+//	_pub.publish(_cloudPtr);
+//	lastTime = boost::date_time::microsec_clock<boost::posix_time::ptime>::unviersal_time();
+//}
+//else
+//{
+	
+//}
+//        std::cout << "Publishing point cloud with " << XYZ.rows << " " << XYZ.cols << std::endl;
+//        _pub.publish(_cloudPtr);
+//    std::cout << "Publishing unfiltered cloud " << std::endl;
+
+static int count = 0;
+if(count == 10)
+{
+_pub.publish(_cloudPtr);
+count = 0;
+}
+++count;
+
     }
+    
 }
 
 void DepthImageHandler::messageCallback(kinect_differential::DiffKinectConfig& config, uint32_t level)
@@ -157,6 +186,15 @@ void DepthImageHandler::messageCallback(kinect_differential::DiffKinectConfig& c
         std::cout << "Building model" << std::endl;
         buildModel = true;
         config.BuildModel = false;
+    }
+    if(config.ClearModel == true)
+    {
+     std::cout << "Clearning model" << std::endl;
+     config.ClearModel = false;
+      boost::mutex::scoped_lock lock(mtx);
+      modelThresholdHigh.release();
+     modelThresholdLow.release();
+    std::cout << "Finished clearing model" << std::endl;
     }
 }
 
@@ -172,14 +210,14 @@ void DepthImageHandler::depthCallback(const sensor_msgs::ImageConstPtr &msg)
         ROS_ERROR("Could not convert from '%s' to '16UC1'.", msg->encoding.c_str());
         return;
     }
-    std::cout << "Received depth image of " << depthImg.rows << " x " << depthImg.cols << std::endl;
+  //  std::cout << "Received depth image of " << depthImg.rows << " x " << depthImg.cols << std::endl;
     handleDepthReceived(depthImg, cv::Mat());
 }
 void DepthImageHandler::ptCloudCallback(const sensor_msgs::PointCloud2 &pc2)
 {
 
     pcl::fromROSMsg(pc2, *_cloudPtr);
-    std::cout << "Received depth image: " << _cloudPtr->width << " x " << _cloudPtr->height << std::endl;
+    //std::cout << "Received depth image: " << _cloudPtr->width << " x " << _cloudPtr->height << std::endl;
 }
 
 bool DepthImageHandler::open(std::string depthTopic, std::string ptCloudTopic)
