@@ -16,11 +16,15 @@
 #include <cv_bridge/cv_bridge.h>
 #include "image_transport/image_transport.h"
 
+#include <pcl/search/flann_search.h>
+#include <pcl/search/impl/flann_search.hpp>
+#include <pcl/search/kdtree.h>
+
 const float fx_d = 5.9421434211923247e+02;
 const float fy_d = 5.9104053696870778e+02;
 const float cx_d = 3.3930780975300314e+02;
 const float cy_d = 2.4273913761751615e+02;
-
+#define NUM_THREADS 4
 class DepthImageHandler
 {
 public:
@@ -53,7 +57,10 @@ public:
     ros::Subscriber ptCloudSub;
     pcl::PointCloud<pcl::PointXYZ>::Ptr _cloudPtr;
     pcl::PointCloud<pcl::PointXYZ>::Ptr _modelPtr;
+	pcl::PointCloud<pcl::PointXYZ>::Ptr _filteredCloudPtr;
     boost::mutex mtx;
+	
+	pcl::search::FlannSearch<pcl::PointXYZ>::Ptr _modelTree;
 };
 
 DepthImageHandler::DepthImageHandler(const std::string &name):
@@ -79,103 +86,52 @@ DepthImageHandler::~DepthImageHandler()
         delete cam;
     }
 }
-
+void radiusSearchHelper(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud, pcl::search::Search<pcl::PointXYZ>::Ptr searchTree, const std::vector<int>& idx, std::vector<unsigned char>* found, int threads, int thread, float radius)
+{
+    std::vector<int> knn_idx;
+    std::vector<float> dist;
+    for(int i = thread; i < idx.size(); i+= threads)
+    {
+        searchTree->radiusSearch(*cloud, idx[i], radius, knn_idx,dist,1);
+        (*found)[i] = knn_idx.size();
+    }
+}
 void DepthImageHandler::handleDepthReceived(cv::Mat depth, cv::Mat XYZ)
 {
-boost::mutex::scoped_lock lock(mtx);
-std::cout << "Received depth image " << depth.depth()<< std::endl;
-    if(buildModel)
-    {
-        static std::vector<cv::Mat> frames;
-        frames.reserve(numFramesToBuildModel);
-        if(frames.size() == numFramesToBuildModel)
-        {
-            cv::Mat sum = cv::Mat::zeros(depth.size(), CV_32F);
-            cv::Mat sum_sq = cv::Mat::zeros(depth.size(), CV_32F);
-            cv::Mat frame;
-            for(int i = 0 ; i < frames.size(); ++i)
-            {
-                frames[i].convertTo(frame,CV_32F);
-                sum += frame;
-                //sum_sq += frame.mul(frame);
-            }
-            cv::Mat mean = sum * (1.0 / frames.size());
-            //cv::Mat var = (sum_sq - sum.mul(sum)/float(frames.size()))/(float(frames.size()) - 1);
-            //cv::sqrt(var, var);
-            cv::Mat(mean + 10).convertTo(modelThresholdHigh, CV_16U);
-            cv::Mat(mean - 10).convertTo(modelThresholdLow, CV_16U);
+	boost::mutex::scoped_lock lock(mtx);
+	std::cout << "Received depth image " << depth.depth()<< std::endl;
+    if(_modelTree)
+	{
+		std::vector<int> idx;
 
-            frames.clear();
-            buildModel = false;
-        }else
+        idx.reserve(_cloudPtr->points.size());
+        for(int i = _cloudPtr->points.size() - 1; i > 0; --i)
+            if(_cloudPtr->points[i].x == _cloudPtr->points[i].x)
+                idx.push_back(i);
+		std::vector<unsigned char> found(idx.size(),0);
+        boost::thread threads[NUM_THREADS - 1];
+        for(int i = 1; i < NUM_THREADS; ++i)
         {
-            frames.push_back(depth);
+            threads[i - 1] = boost::thread(boost::bind(&radiusSearchHelper,_cloudPtr, _modelTree, boost::ref(idx), &found, NUM_THREADS, i, 0.2));
         }
-        _modelPtr = _cloudPtr;
-        _cloudPtr.reset(new pcl::PointCloud<pcl::PointXYZ>);
-        _modelPub = _nh.advertise<sensor_msgs::PointCloud2>(_nh.resolveName("KinectCamera/ModelCloud"),1); //_it.advertise(_name, 1);
-        _modelPub.publish(_modelPtr);
-      std::cout << "Publishing model " << std::endl;
-    }
-    if(!modelThresholdHigh.empty() && !modelThresholdLow.empty())
-    {
-        if(_pub.getNumSubscribers() > 0)
+		radiusSearchHelper(_cloudPtr, _modelTree, idx, &found, NUM_THREADS, 0, 0.2);
+        for(int i = 0; i < NUM_THREADS - 1; ++i)
         {
-            cv::Mat mask1 = depth > modelThresholdHigh;
-            cv::Mat mask2 = depth < modelThresholdLow;
-            cv::Mat mask;
-
-            cv::bitwise_or(mask1,mask2, mask);
-            int numPoints = cv::countNonZero(mask);
-            if(numPoints)
-              std::cout << "Number of filtered points: " << numPoints << std::endl;
-            unsigned short* ptr = depth.ptr<unsigned short>(0);
-            uchar* maskPtr = mask.ptr<uchar>(0);
-            pcl::PointCloud<pcl::PointXYZ>::Ptr ptCloud(new pcl::PointCloud<pcl::PointXYZ>());
-            ptCloud->reserve(numPoints);
-            unsigned int count = 0;
-            for(int i = 0; i < mask.rows; ++i, ++ptr, ++maskPtr, ++count)
-            {
-                for(int j = 0; j < mask.cols; ++j, ++ptr, ++maskPtr, ++count)
-                {
-                    if(*maskPtr)
-                    {
-                        ptCloud->push_back((*_cloudPtr)[count]);
-                    }
-                }
-            }
-            _pub.publish(ptCloud);
-         std::cout << "Publishing filtered cloud" << std::endl;
-		return;
+            threads[i].join();
         }
-    }else
-    {
-        if(_pub.getNumSubscribers() == 0)
-            return;
-//static boost::posix_time::ptime lastTIme = boost::date_time::microsec_clock<boost::posix_time::ptime>::universal_time();
-//	boost::posix_time::ptime currentTime = boost::date_time::microsec_clock<boost::posix_time::ptime>::unviersal_time();
-//if(boost::posix_time::time_duration(currentTime - lastTime).total_milliseconds() > 300)
-//{/
-//	_pub.publish(_cloudPtr);
-//	lastTime = boost::date_time::microsec_clock<boost::posix_time::ptime>::unviersal_time();
-//}
-//else
-//{
-	
-//}
-//        std::cout << "Publishing point cloud with " << XYZ.rows << " " << XYZ.cols << std::endl;
-//        _pub.publish(_cloudPtr);
-//    std::cout << "Publishing unfiltered cloud " << std::endl;
-
-static int count = 0;
-if(count == 10)
-{
-_pub.publish(_cloudPtr);
-count = 0;
-}
-++count;
-
-    }
+        size_t count = std::accumulate(found.begin(), found.end(), 0);
+        _filteredCloudPtr.reset(new pcl::PointCloud<pcl::PointXYZ>());
+        _filteredCloudPtr->points.reserve(_cloudPtr->points.size() - count);
+        for(int i = 0; i < found.size(); ++i)
+        {
+            if(found[i] == 0)
+                _filteredCloudPtr->points.push_back(_cloudPtr->points[idx[i]]);
+        }
+		_pub.publish(_filteredCloudPtr);
+	}else
+	{
+		_pub.publish(_cloudPtr);
+	}
     
 }
 
@@ -186,6 +142,10 @@ void DepthImageHandler::messageCallback(kinect_differential::DiffKinectConfig& c
         std::cout << "Building model" << std::endl;
         buildModel = true;
         config.BuildModel = false;
+		_modelPtr = _cloudPtr;
+		_cloudPtr.reset(new pcl::PointCloud<pcl::PointXYZ>);
+		_modelTree.reset(new pcl::search::FlannSearch<pcl::PointXYZ>(true));
+        _modelTree->setInputCloud(_modelPtr);
     }
     if(config.ClearModel == true)
     {
