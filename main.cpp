@@ -15,13 +15,29 @@
 #include <pcl/point_cloud.h>
 #include <cv_bridge/cv_bridge.h>
 #include "image_transport/image_transport.h"
+#include "gloox/disco.h"
+#include "gloox/message.h"
+#include "gloox/gloox.h"
+#include "gloox/siprofileft.h"
+#include "gloox/bytestreamdatahandler.h"
+#include "gloox/socks5bytestreamserver.h"
+#include "gloox/loghandler.h"
+#include "gloox/connectionlistener.h"
+#include "gloox/messagesessionhandler.h"
+#include "gloox/messageeventhandler.h"
+#include "gloox/messageeventfilter.h"
+#include "gloox/messagehandler.h"
+#include "gloox/client.h"
+#include "gloox/chatstatehandler.h"
+#include "gloox/chatstatefilter.h"
 
 const float fx_d = 5.9421434211923247e+02;
 const float fy_d = 5.9104053696870778e+02;
 const float cx_d = 3.3930780975300314e+02;
 const float cy_d = 2.4273913761751615e+02;
 
-class DepthImageHandler
+using namespace gloox;
+class DepthImageHandler: public MessageSessionHandler, ConnectionListener, LogHandler, MessageEventHandler, MessageHandler, ChatStateHandler
 {
 public:
     DepthImageHandler(const std::string& name = "Kinect");
@@ -33,9 +49,17 @@ public:
     void depthCallback(const sensor_msgs::ImageConstPtr &msg);
     void ptCloudCallback(const sensor_msgs::PointCloud2 &pc2);
     bool open(std::string depthTopic, std::string ptCloudTopic);
-
-
-
+    
+    // gloox message handling functions
+    virtual void onCOnnect();
+    virtual void onDisconnect(ConnectionError e);
+    virtual bool onTLSConnect(const CertInfo& info)
+    virtual void handleMessage(const Message& msg, MessageSession* session);
+    virtual void handleMessageEvent(const JID& from, MessageEventType messageEvent);
+    virtual void handleChatState(const JID& from, ChatStateType state);
+    virtual void handleMessageSession(MessageSession* session);
+    virtual void handleLog(LogLevel level, LogArea area, const std::string& message);
+    
     cv::VideoCapture* cam;
     ros::NodeHandle _nh;
     ros::Publisher _pub;
