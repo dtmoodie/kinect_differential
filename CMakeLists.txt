@@ -11,7 +11,7 @@ find_package(catkin REQUIRED COMPONENTS
     cv_bridge
     image_transport
 )
-
+SET(CMAKE_CXX_FLAGS "-std=c++11")
 find_package(OpenCV 3.0 REQUIRED COMPONENTS core videoio)
 find_package(PCL REQUIRED COMPONENTS common)
 find_package(libfreenect REQUIRED)
